@@ -428,9 +428,42 @@ dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.a
 dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop',e=>{e.preventDefault();dropZone.classList.remove('dragover');if(e.dataTransfer.files[0])loadFile(e.dataTransfer.files[0]);});
 fileInput.addEventListener('change',()=>{if(fileInput.files[0])loadFile(fileInput.files[0]);});
+const REQUIRED_HEADERS=['Practitioner','Subtotal'];
+const REQUIRED_DATE_HEADERS=['Service Date','Invoice Date'];
 function loadFile(file){
   const reader=new FileReader();
-  reader.onload=e=>{csvData=parseCSV(e.target.result);document.getElementById('filename-display').textContent=file.name+` (${csvData.length-1} rows)`;checkReady();};
+  reader.onload=e=>{
+    const errEl=document.getElementById('error-msg');
+    let parsed;
+    try{
+      parsed=parseCSV(e.target.result);
+    }catch(err){
+      errEl.textContent='Could not read this file as CSV. Make sure you exported the Practitioner Sales report and not something else.';
+      errEl.style.display='block';
+      csvData=null; document.getElementById('filename-display').textContent=''; checkReady();
+      return;
+    }
+    if(!parsed||parsed.length===0){
+      errEl.textContent='This file has no data rows.';
+      errEl.style.display='block';
+      csvData=null; document.getElementById('filename-display').textContent=''; checkReady();
+      return;
+    }
+    const headers=Object.keys(parsed[0]);
+    const missingRequired=REQUIRED_HEADERS.filter(h=>!headers.includes(h));
+    const hasDateCol=REQUIRED_DATE_HEADERS.some(h=>headers.includes(h));
+    if(missingRequired.length>0||!hasDateCol){
+      const missing=[...missingRequired,...(hasDateCol?[]:['Service Date/Invoice Date'])];
+      errEl.textContent=`This file is missing expected column(s): ${missing.join(', ')}. Check that this is the correct Noterro export — Reports → Finance → Practitioner Sales.`;
+      errEl.style.display='block';
+      csvData=null; document.getElementById('filename-display').textContent=''; checkReady();
+      return;
+    }
+    errEl.style.display='none';
+    csvData=parsed;
+    document.getElementById('filename-display').textContent=file.name+` (${csvData.length} rows)`;
+    checkReady();
+  };
   reader.readAsText(file);
 }
 function checkReady(){
