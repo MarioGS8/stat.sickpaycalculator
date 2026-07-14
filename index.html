@@ -332,7 +332,9 @@ function parseDuration(name){
 // the previous version of this file checked Recovery Zone before Cancellation, so a
 // cancelled Recovery Zone session was silently paid out as a normal RZ commission
 // instead of being flagged for manual review like every other cancellation. Cancellation
-// is now checked first, matching payroll.
+// is now checked first, matching payroll. It has ALSO been moved ahead of the product
+// checks below (previously still after them), for the identical reason: a cancelled
+// product sale was slipping through as a paid 10% commission instead of being flagged.
 function isMassage(name){ return /\(MT\)/i.test(name)||(/massage/i.test(name)&&!/\(AT\)/i.test(name)); }
 function isATMassage(name){ return /\(AT\)/i.test(name); }
 function isAdminHours(cat,name){ return /^admin$/i.test(cat)||/admin hours/i.test(name); }
@@ -359,12 +361,12 @@ function getDurationRate(rates,mins){
 function getCommission(category,name,subtotal,rates,productCat,serviceTime){
   const cat=(category||'').trim();
   const n=(name||'').trim();
+  if(isCancellation(cat,n)) return{commission:0,charting:0,label:'Cancellation — review manually',flag:true,isTreatment:false};
   if(productCat) return{commission:subtotal*0.10,charting:0,label:'Product (10%)',flag:false,isTreatment:false};
   if(isProduct(cat,n)) return{commission:subtotal*0.10,charting:0,label:'Product (10%)',flag:false,isTreatment:false};
-  if(isCancellation(cat,n)) return{commission:0,charting:0,label:'Cancellation — review manually',flag:true,isTreatment:false};
   if(isRecoveryZone(cat)){
-    if(isRLT(n)) return{commission:rates.rz15||6,charting:0,label:'Recovery Zone 15min',flag:false,isTreatment:false};
-    return{commission:rates.rz30||12,charting:0,label:'Recovery Zone 30min+',flag:false,isTreatment:false};
+    if(isRLT(n)) return{commission:rates.rz15??6,charting:0,label:'Recovery Zone 15min',flag:false,isTreatment:false};
+    return{commission:rates.rz30??12,charting:0,label:'Recovery Zone 30min+',flag:false,isTreatment:false};
   }
   if(isAdminHours(cat,n)){
     if(/sick|personal day/i.test(n)) return{commission:0,charting:0,label:'Excluded',flag:false,isTreatment:false};
@@ -377,6 +379,7 @@ function getCommission(category,name,subtotal,rates,productCat,serviceTime){
     if(rawMins===45) rawMins=30;
     else if(rawMins===75) rawMins=60;
     else if(rawMins===105) rawMins=90;
+    else rawMins=Math.max(0,rawMins-15); // fallback: any other booked length still has 15min downtime baked in
     return{commission:parseFloat((rates.massage*(rawMins/60)).toFixed(2)),charting:0,label:`Massage (${rawMins}min @ $${rates.massage}/hr)`,flag:false,isTreatment:true};
   }
   if(isATMassage(n)){
@@ -398,9 +401,13 @@ function parseCSV(text){
     const line=lines[i];if(!line.trim())continue;
     const vals=[];let inQ=false,cur='';
     for(let c=0;c<line.length;c++){
-      if(line[c]==='"'){inQ=!inQ;}
-      else if(line[c]===','&&!inQ){vals.push(cur);cur='';}
-      else{cur+=line[c];}
+      const ch=line[c];
+      if(ch==='"'){
+        if(inQ&&line[c+1]==='"'){cur+='"';c++;}
+        else{inQ=!inQ;}
+      }
+      else if(ch===','&&!inQ){vals.push(cur);cur='';}
+      else{cur+=ch;}
     }
     vals.push(cur);
     const row={};
@@ -428,7 +435,7 @@ dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.a
 dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop',e=>{e.preventDefault();dropZone.classList.remove('dragover');if(e.dataTransfer.files[0])loadFile(e.dataTransfer.files[0]);});
 fileInput.addEventListener('change',()=>{if(fileInput.files[0])loadFile(fileInput.files[0]);});
-const REQUIRED_HEADERS=['Practitioner','Subtotal'];
+const REQUIRED_HEADERS=['Practitioner','Subtotal','Service Category'];
 const REQUIRED_DATE_HEADERS=['Service Date','Invoice Date'];
 function loadFile(file){
   const reader=new FileReader();
